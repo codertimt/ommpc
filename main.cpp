@@ -39,6 +39,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <unistd.h>
 #include <errno.h>
 #include "config.h"
+#include "lastfm.h"
 #include "browser.h"
 #include "plBrowser.h"
 #include "bookmarks.h"
@@ -63,6 +64,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include "unistd.h"
 #include <dirent.h>
+
 
 using namespace std;
 
@@ -90,6 +92,42 @@ void initVolumeScale(vector<int>& volumeScale, bool f200, string softVol, int ve
 
 }
 
+Config config;
+bool g_resized = false;
+int g_width = 0;
+int g_height = 0;
+int g_minWidth = config.getItemAsNum("sk_min_screen_width");
+int g_minHeight = config.getItemAsNum("sk_min_screen_height");
+int g_maxWidth = config.getItemAsNum("sk_screen_width");
+int g_maxHeight = config.getItemAsNum("sk_screen_height");
+
+int eventFilter( const SDL_Event *e )
+{
+    if( e->type == SDL_VIDEORESIZE )
+    {
+		if(e->resize.w > g_minWidth)
+			g_width = e->resize.w;
+		else if(e->resize.w > g_maxWidth)
+			g_width = g_maxWidth;
+		else
+			g_width = g_minWidth;
+
+		if(e->resize.h > g_minHeight)
+			g_height = e->resize.h;
+		else if(e->resize.h > g_maxHeight)
+			g_height = g_maxHeight;
+		else
+			g_height = g_minHeight;
+
+
+        SDL_SetVideoMode(g_width,g_height,
+						32,
+						SDL_HWSURFACE|SDL_DOUBLEBUF|SDL_RESIZABLE);
+		g_resized = true;
+    }
+    return 1; // return 1 so all events are added to queue
+}
+
 int main ( int argc, char** argv )
 {
 	bool initVolume = true;
@@ -112,11 +150,62 @@ int main ( int argc, char** argv )
 		cout << "Fork failed" << endl;
 		exit(1);
 	} else if(pid == 0) { //child..attempt to launch mpd
-		Config config;
-		if(config.verifyMpdPaths()) {		
-			char pwd[129];
-			getcwd(pwd, 128);
-			string pwdStr(pwd);
+		char pwd[129];
+		getcwd(pwd, 128);
+		string pwdStr(pwd);
+
+		string mPath = config.getItem("musicRoot");	
+		string pPath = config.getItem("playlistRoot");	
+
+		int lastPos = -1;
+		for(int i=0; i<3; ++i) {
+			lastPos = pwdStr.find('/', lastPos+1);
+		}
+		string cardName = pwdStr.substr(0, lastPos+1);	
+		if(mPath[0] != '/') {
+			mPath = cardName + mPath;
+		}
+	
+		if(pPath[0] != '/') {
+			pPath = cardName + pPath;
+		}
+
+		ofstream mpdConf("mpd.conf", ios::out|ios::trunc);
+		mpdConf << "port   \"6600\"" << endl;
+		mpdConf << "audio_buffer_size    \"1024\"" << endl;
+		mpdConf << "buffer_before_play    \"25%\"" << endl;
+		mpdConf << "audio_output {" << endl;
+		mpdConf << "type    \"alsa\"" << endl;
+		mpdConf << "name    \"My ALSA Device\"" << endl;
+		mpdConf << "format    \"44100:16:2\"" << endl;
+//		mpdConf << "options    \"dev=dmixer\"" << endl;
+//		mpdConf << "device   \"plug:dmix\"" << endl;
+		mpdConf << "}" << endl;
+		mpdConf << "mixer_type    \"software\"" << endl;
+		mpdConf << "filesystem_charset    \"UTF-8\"" << endl;
+		mpdConf << "id3v1_encoding   \"UTF-8\"" << endl;
+		mpdConf << "music_directory    \"" + mPath + "\"" << endl;
+		mpdConf << "playlist_directory    \"" + pPath + "\"" << endl;
+		mpdConf << "log_file    \"" + pwdStr + "/.mpdlog\"" << endl;
+		mpdConf << "error_file    \"" + pwdStr + "/.mpderror\"" << endl;
+		mpdConf << "db_file    \"" + pwdStr + "/db\"" << endl;
+		mpdConf << "pid_file    \"" + pwdStr + "/.pid\"" << endl;
+		mpdConf << "state_file    \"" + pwdStr + "/.mpdstate\"" << endl;
+		mpdConf.close();
+		
+		if(config.verifyMpdPaths()) {	
+	
+			struct stat stFileInfo; 
+
+			int exists = stat("db",&stFileInfo); 
+			if(exists != 0) { 
+				// does not exist
+				ifstream ifs("db.pnd", ios::binary);
+				ofstream ofs("db", ios::binary);
+
+				ofs << ifs.rdbuf();
+
+			}
 			pwdStr += "/mpd/mpd";
 			execlp(pwdStr.c_str(), pwdStr.c_str(), "--no-create-db", "mpd.conf",  NULL);
 			cout << errno << " " << strerror(errno) << endl;
@@ -144,7 +233,6 @@ int main ( int argc, char** argv )
 
 		cout << "child exit status " << WEXITSTATUS(status) << endl;
 		try {
-			Config config;
 			GuiPos guiPos;
 			GP2XRegs gp2xRegs;
 				
@@ -174,31 +262,30 @@ int main ( int argc, char** argv )
 			}
 cout << "set video mode" << endl;
 			// create a new window
+			SDL_SetEventFilter( &eventFilter ); 
 			SDL_Surface* screen = SDL_SetVideoMode(config.getItemAsNum("sk_screen_width"),
 												   config.getItemAsNum("sk_screen_height"),
-#if defined(WIZ)
+#if defined(WIZ) || defined(PAND)
 													16,
-													SDL_SWSURFACE);
+													SDL_SWSURFACE|SDL_FULLSCREEN);
 #else
-													32,
+													16,
 													SDL_HWSURFACE|SDL_DOUBLEBUF);
+													//SDL_HWSURFACE|SDL_DOUBLEBUF|SDL_FULLSCREEN);
 #endif
 			if ( !screen )
 			{
 				printf("Unable to set 320x240 video: %s\n", SDL_GetError());
 				return 1;
 			}
-#if defined(GP2X) || defined(WIZ)
+#if defined(GP2X) || defined(WIZ) || defined(PAND)
 			SDL_ShowCursor(SDL_DISABLE);
 #endif
 			SDL_Rect mainRect = { config.getItemAsNum("sk_main_x"),
 				config.getItemAsNum("sk_main_y"),
-				config.getItemAsNum("sk_main_width"),
-				config.getItemAsNum("sk_main_height")
-			};
-			SDL_Rect fullRect = { 0,0,
-				config.getItemAsNum("sk_screen_width"),
-				config.getItemAsNum("sk_screen_height")
+				config.getItemAsNum("sk_screen_width") * config.getItemAsFloat("sk_main_width"),
+				config.getItemAsNum("sk_screen_height") - config.getItemAsFloat("sk_nowPlaying_height") 
+														- config.getItemAsFloat("sk_stats_height"),
 			};
 			SDL_Rect artRect = { config.getItemAsNum("sk_art_x"),
 				config.getItemAsNum("sk_art_y"),
@@ -207,12 +294,12 @@ cout << "set video mode" << endl;
 			};
 			SDL_Rect nowPlayingRect = { config.getItemAsNum("sk_nowPlaying_x"),
 				config.getItemAsNum("sk_nowPlaying_y"),
-				config.getItemAsNum("sk_nowPlaying_width"),
+				config.getItemAsNum("sk_screen_width") * config.getItemAsFloat("sk_nowPlaying_width"),
 				config.getItemAsNum("sk_nowPlaying_height")
 			};
 			SDL_Rect statsRect = { config.getItemAsNum("sk_stats_x"),
 				config.getItemAsNum("sk_stats_y"),
-				config.getItemAsNum("sk_stats_width"),
+				config.getItemAsNum("sk_screen_width") * config.getItemAsFloat("sk_stats_width"),
 				config.getItemAsNum("sk_stats_height")
 			};
 			SDL_Rect helpRect = { config.getItemAsNum("sk_help_x"),
@@ -220,18 +307,13 @@ cout << "set video mode" << endl;
 				config.getItemAsNum("sk_help_width"),
 				config.getItemAsNum("sk_help_height")
 			};
-			SDL_Rect menuRect = { config.getItemAsNum("sk_menu_x"),
-				config.getItemAsNum("sk_menu_y"),
-				config.getItemAsNum("sk_menu_width"),
-				config.getItemAsNum("sk_menu_height")
-			};
 			SDL_Rect clearRect = { 0,0,screen->w, screen->h};
 
 			SDL_Rect popRect;
-			popRect.w = 150;
-			popRect.h = 100;
-			popRect.x = (screen->w - 150) / 2;
-			popRect.y = (screen->h - 100) / 2;
+			popRect.w = 450;
+			popRect.h = 200;
+			popRect.x = (screen->w - 450) / 2;
+			popRect.y = (screen->h - 200) / 2;
 			threadParms_t threadParms;
 			if(mpdStarted) {
 				threadParms.mpd = mpd_newConnection(config.getItem("host").c_str(), 
@@ -271,12 +353,12 @@ cout << "set video mode" << endl;
 				mpd_freeStatus(rtmpdStatus);
 			}
 			rtmpdStatus = NULL;
-#if defined(GP2X) || defined(WIZ)
-			if (mpdStarted && rtmpdState == MPD_STATUS_STATE_PLAY) {
-				mpd_sendPauseCommand(threadParms.mpd, 1);
-				mpd_finishCommand(threadParms.mpd);
-			}
-			gp2xRegs.setClock(config.getItemAsNum("cpuSpeed"));
+#if defined(GP2X) || defined(WIZ) || defined(PAND)
+//			if (mpdStarted && rtmpdState == MPD_STATUS_STATE_PLAY) {
+//				mpd_sendPauseCommand(threadParms.mpd, 1);
+//				mpd_finishCommand(threadParms.mpd);
+//			}
+			//gp2xRegs.setClock(config.getItemAsNum("cpuSpeed"));
 #endif
 			TTF_Font* font = TTF_OpenFont(config.getItem("sk_font_main").c_str(),
 										  config.getItemAsNum("sk_font_main_size"));
@@ -285,8 +367,12 @@ cout << "set video mode" << endl;
 
 			string skinName = config.getItem("skin");
 			SDL_Surface * tmpbg = IMG_Load(string("skins/"+skinName+"/bg.png").c_str());
-			if (!tmpbg)
-				printf("Unable to load skin image: %s\n", SDL_GetError());
+			if (!tmpbg) {
+				tmpbg = IMG_Load(string("skins/"+skinName+"/bg.jpg").c_str());
+				
+				if (!tmpbg) 
+					printf("Unable to load skin image: %s\n", SDL_GetError());
+			}
 			SDL_Surface * bg = SDL_DisplayFormat(tmpbg);
 
 			Keyboard keyboard(screen, config);
@@ -298,7 +384,7 @@ cout << "set video mode" << endl;
 			PLBrowser plBrowser(threadParms.mpd, screen, bg, font, mainRect, config, skipVal, numPerScreen, playlist, keyboard);
 			NowPlaying playing(threadParms.mpd, threadParms.lockConnection, screen, bg, config, nowPlayingRect, playlist);
 			StatsBar statsBar(threadParms.mpd, threadParms.lockConnection, screen, bg, config, statsRect, initVolume, playlist, f200, volumeScale);
-			Overlay overlay(threadParms.mpd, screen, config, clearRect, playlist);
+			//Overlay overlay(threadParms.mpd, screen, config, clearRect, playlist);
 			ButtonManager buttonManager(threadParms.mpd, threadParms.lockConnection, screen, bg, config, volumeScale);
 			Bookmarks bookmarks(threadParms.mpd, screen, bg, font, mainRect, skipVal, numPerScreen, playlist, config, statsBar, buttonManager, classicStatsBar, keyboard);
 			CommandFactory commandFactory(threadParms.mpd, volumeScale);
@@ -308,7 +394,7 @@ cout << "set video mode" << endl;
 			int isPlaying = 0;
 			if(mpdStarted) {
 				try {
-					Config stateConfig(".ommcState");
+					Config stateConfig(".ommpcState");
 					curMode = stateConfig.getItemAsNum("mode");
 					volume = stateConfig.getItemAsNum("vol");	
 					isPlaying = stateConfig.getItemAsNum("playing");
@@ -349,6 +435,16 @@ cout << "set video mode" << endl;
 			AlbumArt albumArt(threadParms.mpd, screen, bg, config, artRect, artParms);
 			FullPlaying fullPlaying(threadParms.mpd, screen, bg, font, mainRect, config, skipVal, numPerScreen, keyboard, artParms);
 
+
+
+			string scrobbling = config.getItem("scrobbling");
+			string scrobbleUser = config.getItem("scrobbleUser");
+			string scrobblePass = config.getItem("scrobblePass");
+			Lastfm lastfm;
+			lastfm.toggleScrobbling(scrobbling, scrobbleUser, scrobblePass);
+			
+
+			bool forceRefresh = true;
 			bool done = false;
 			bool killMpd = false;
 			bool launchProcess = false;
@@ -357,7 +453,6 @@ cout << "set video mode" << endl;
 			int prevCommand = -1;
 			bool keysHeld[401] = {false};
 			int repeatDelay = 0;
-			bool forceRefresh = true;
 			bool processedEvent = false;
 			bool repeat = false;
 			bool random = false;
@@ -386,11 +481,50 @@ cout << "away we go" << endl;
 				//popupVisible = showOptionsMenu(screen, popup, config);
 			}
 //			ofstream out("uptime", ios::out);
+			Timer timer3;	
 			while (!done)
 			{
+				if(gp2xRegs.screenIsOff())  {
+					threadParms.mpdReady = false;
+					if(SDL_PollEvent(&event))
+					{
+						if(event.type == SDL_MOUSEMOTION) {
+							continue;
+						}
+						switch (event.type) {
+							case SDL_KEYDOWN:
+								command = commandFactory.keyDownWhileLocked(event.key.keysym.sym);
+							break;
+							case SDL_KEYUP:
+								command = commandFactory.keyUpWhileLocked(event.key.keysym.sym);
+							break;
+						}
+					}
+						command = commandFactory.checkRepeatWhileLocked(command, prevCommand);
+			
+					if(command == CMD_TOGGLE_SCREEN) {
+						gp2xRegs.toggleScreen();
+/*
+						if(config.getItemAsNum("cpuSpeed") != 
+							config.getItemAsNum("cpuSpeedLocked")) {
+							if(gp2xRegs.screenIsOff())
+								gp2xRegs.setClock(config.getItemAsNum("cpuSpeedLocked"));
+							else
+								gp2xRegs.setClock(1);
+						}
+*/
+						forceRefresh = true;
+						popupVisible = false;
+						threadParms.mpdReady = true;
+					}
+					prevCommand = command;
+					command = 0;
+					usleep(50000);
+
+				} else {
 				now = timer.check();
 				nextFrame = now + frameTime;
- 				
+ 			
 				SDL_mutexP(threadParms.lockConnection);
 				// let's start with checking some polled status items
 				if(threadParms.mpdStatusChanged & VOL_CHG) {
@@ -412,22 +546,22 @@ cout << "away we go" << endl;
 					//this stops the mouse motion event from taking 
 					//too much time and screwing sutff up.
 						case SDL_KEYDOWN:
-							command = commandFactory.keyDown(event.key.keysym.sym, curMode);
+							command = commandFactory.keyDown(event.key.keysym.sym, curMode, keyboardVisible);
 						break;
 						case SDL_KEYUP:
 							if(popupVisible)
 								command = commandFactory.keyPopup(event.key.keysym.sym, curMode, command);
 							else
-								command = commandFactory.keyUp(event.key.keysym.sym, curMode);
+								command = commandFactory.keyUp(event.key.keysym.sym, curMode, keyboardVisible);
 						break;
 						case SDL_JOYBUTTONDOWN:
-							command = commandFactory.keyDown(event.jbutton.button, curMode);
+							command = commandFactory.keyDown(event.jbutton.button, curMode, keyboardVisible);
 						break;
 						case SDL_JOYBUTTONUP:
 							if(popupVisible)
 								command = commandFactory.keyPopup(event.jbutton.button, curMode, command);
 							else
-								command = commandFactory.keyUp(event.jbutton.button, curMode);
+								command = commandFactory.keyUp(event.jbutton.button, curMode, keyboardVisible);
 						break;
 						case SDL_MOUSEBUTTONDOWN:
 							SDL_GetMouseState(&guiPos.curX, &guiPos.curY);
@@ -445,38 +579,41 @@ cout << "away we go" << endl;
 					}
 					processedEvent = true;
 				} // end of message processing
-				command = commandFactory.checkRepeat(command, prevCommand, curMode, guiPos.curX, guiPos.curY);	
+
+				//check resize event results
+				if(g_resized) {
+					g_resized = false;
+					forceRefresh = true;
+				
+					cout << "doing resize code" << endl;	
+					int numPerScreen = (g_height-(2*skipVal))/skipVal+1;
+					//reset sizes of crap
+					menu.resize(g_width, g_height, numPerScreen);
+					playing.resize(g_width);
+					statsBar.resize(g_width);
+				}
+				command = commandFactory.checkRepeat(command, prevCommand, curMode, guiPos.curX, guiPos.curY, keyboardVisible);	
 				if(keyboardVisible) {
 					int preCommand = command;
-					command = keyboard.processCommand(command, guiPos);
+
+					command = keyboard.processCommand(command, guiPos, commandFactory.getCurKey());
 					if(command == CMD_SAVE_PL || command == CMD_SAVE_BKMRK 
 						|| command == CMD_HIDE_KEYBOARD || command == CMD_POP_CHG_OPTION) {
 						keyboardVisible = false;
 						forceRefresh = true;
+						commandFactory.clearKeys();
+						
 					}
 					if(command != preCommand) {
 						forceRefresh = true;
 					}
 				}
-				if(overlayVisible) {
-					int preCommand = command;
-					command = overlay.processCommand(command, guiPos, overlayVisible, curMode);
-					if(command == CMD_SHOW_MENU) {
-						overlayVisible = false;
-						forceRefresh = true;
-					}
-					if(command != preCommand) {
-						forceRefresh = true;
-					}
-				} else {
-					command = overlay.processCommand(command, guiPos, overlayVisible, curMode);
-				}	
+				
 				if(popupVisible) {
 					command = popup.processCommand(command, guiPos);
 					switch(command) {
 						case CMD_POP_SELECT:
 							command = popup.processPopupCommand();
-cout << "command = " << command << endl;
 							forceRefresh = true;
 							popupVisible = false;	
 							break;
@@ -510,18 +647,16 @@ cout << "command = " << command << endl;
 						break;
 					case CMD_TOGGLE_SCREEN:
 						gp2xRegs.toggleScreen();
+/*
 						if(config.getItemAsNum("cpuSpeed") != 
 							config.getItemAsNum("cpuSpeedLocked")) {
-							mpd_sendPauseCommand(threadParms.mpd, 1);
-							mpd_finishCommand(threadParms.mpd);
-							usleep(500);	
 							if(gp2xRegs.screenIsOff())
 								gp2xRegs.setClock(config.getItemAsNum("cpuSpeedLocked"));
 							else
-								gp2xRegs.setClock(config.getItemAsNum("cpuSpeed"));
-							mpd_sendPauseCommand(threadParms.mpd, 0);
-							mpd_finishCommand(threadParms.mpd);
+								gp2xRegs.setClock(1);
 						}
+*/
+						popupVisible = popup.showPopupLocked(screen, config, curMode);
 						break;
 					case CMD_VOL_UP:
 						if(volume < 20) {
@@ -644,10 +779,12 @@ cout << "command menu stetet" << endl;
 						curMode = 5;
 						forceRefresh = true;
 						break;
+/*
 					case CMD_SHOW_OVERLAY:
 						overlayVisible = !overlayVisible;
 						forceRefresh = true;
 						break;
+*/
 					case CMD_LAUNCH_APP:
 						char pwd[129];
 						getcwd(pwd, 128);
@@ -704,12 +841,7 @@ cout << "command menu stetet" << endl;
 						break;
 				}
 
-				//if(!gp2xRegs.screenIsOff())  {
 					// DRAWING STARTS HERE
-					if(forceRefresh) {
-						//					SDL_SetClipRect(screen, &clearRect);
-						//					SDL_FillRect(screen, &clearRect, SDL_MapRGB(screen->format, backColor.r, backColor.g, backColor.b));
-					}
 
 					playlist.updateStatus(threadParms.mpdStatusChanged, 
 							threadParms.mpdStatus, 
@@ -724,12 +856,6 @@ cout << "command menu stetet" << endl;
 								rtmpdStatus, 
 								forceRefresh);
 						statsBar.draw(forceRefresh, fps);
-					}
-					if(false) {//config.getItem("showAlbumArt") == "true") {
-						albumArt.updateStatus(threadParms.mpdStatusChanged, 
-								threadParms.mpdStatus,
-								rtmpdStatusChanged, rtmpdStatus);
-						albumArt.draw(forceRefresh);
 					}
 					browser.updateStatus(threadParms.mpdStatusChanged, 
 							threadParms.mpdStatus, songDbParms.updating);
@@ -750,6 +876,7 @@ cout << "command menu stetet" << endl;
 							} else if(rMode == CMD_HIDE_KEYBOARD) {
 								keyboardVisible = false;
 								forceRefresh = true;
+								commandFactory.clearKeys();
 							} else if(rMode == CMD_POP_CONTEXT) {
 								popupVisible = popup.showPopupTouch(screen, config, curMode);
 							} else
@@ -781,6 +908,7 @@ cout << "command menu stetet" << endl;
 							} else if(rMode == CMD_HIDE_KEYBOARD) {
 								keyboardVisible = false;
 								forceRefresh = true;
+								commandFactory.clearKeys();
 							} else if(rMode == CMD_POP_CONTEXT) {
 								popupVisible = popup.showPopupTouch(screen, config, curMode);
 							}
@@ -797,6 +925,7 @@ cout << "command menu stetet" << endl;
 							} else if(rMode == CMD_HIDE_KEYBOARD) {
 								keyboardVisible = false;
 								forceRefresh = true;
+								commandFactory.clearKeys();
 							} else if(rMode == CMD_POP_CONTEXT) {
 								popupVisible = popup.showPopupTouch(screen, config, curMode);
 							} else 
@@ -816,6 +945,7 @@ cout << "command menu stetet" << endl;
 								} else if(rMode == CMD_HIDE_KEYBOARD) {
 									keyboardVisible = false;
 									forceRefresh = true;
+									commandFactory.clearKeys();
 									settings.draw(forceRefresh, timePerFrame, overlayVisible||keyboardVisible);
 								} else if (rMode == CMD_MENU_SETTINGS) {
 									curMode = 5;
@@ -844,8 +974,8 @@ cout << "command menu stetet" << endl;
 					if(keyboardVisible) {
 						forceRefresh = keyboard.draw(forceRefresh);
 					} else if(overlayVisible) {
-						overlay.draw(forceRefresh);	
-						forceRefresh = false;
+						//overlay.draw(forceRefresh);	
+						//forceRefresh = false;
 					} else {
 						forceRefresh = false;
 					}
@@ -866,11 +996,11 @@ cout << "command menu stetet" << endl;
 						artParms.done = true;
 					}
 
-#if defined(GP2X) || defined(WIZ)
+#if defined(GP2X) || defined(WIZ) || defined(PAND)
 					// start playing, if it was playing when we last exited,
 					// or if we had just paused an already-playing MPD daemon
-					if(mpdStarted && (rtmpdState == MPD_STATUS_STATE_PAUSE && isPlaying)
-							|| rtmpdState == MPD_STATUS_STATE_PLAY) {
+					if(mpdStarted && (rtmpdState == MPD_STATUS_STATE_PAUSE && isPlaying)) {
+							//|| rtmpdState == MPD_STATUS_STATE_PLAY) {
 						mpd_sendPauseCommand(threadParms.mpd, 0);
 						mpd_finishCommand(threadParms.mpd);
 						// only do this once
@@ -883,12 +1013,7 @@ cout << "command menu stetet" << endl;
 					
 					SDL_mutexV(threadParms.lockConnection);
 					
-					if(!gp2xRegs.screenIsOff())  {
-						//gp2xRegs.vsync();
-				 		SDL_Flip(screen);
-					} else {
-					//	SDL_Delay(165);
-					}
+				 	SDL_Flip(screen);
 
 					++frame;
 					if(timer2.check() > 5000000) //5minutes
@@ -908,12 +1033,7 @@ cout << "command menu stetet" << endl;
 						usleep(diffTime);
 					}
 					timePerFrame = timer.check() - now;	
-					
-				//} else {
-				//	SDL_mutexV(threadParms.lockConnection);
-				//	SDL_Delay(150);
-			//	}
-				// DRAWING ENDS HERE
+				} //end of loop when not locked	
 					
 			} // end main loop
 
@@ -924,6 +1044,7 @@ cout << "command menu stetet" << endl;
 				SDL_WaitThread(statusThread, NULL);
 			SDL_Quit();
 
+		//	gp2xRegs.setClock(1);
 			if(mpdStarted) {
 				// get playing state
 				mpd_sendStatusCommand(threadParms.mpd);
@@ -944,19 +1065,20 @@ cout << "command menu stetet" << endl;
 					mpd_finishCommand(threadParms.mpd);
 				}
 
-				//save current state
-				ofstream ommcState(".ommcState", ios::out|ios::trunc);
-				ommcState << "mode=" << curMode << endl;
-				ommcState << "vol=" << volume << endl;
-				ommcState << "playing=" << isPlaying << endl;
-				ommcState.close();
 			}
+			//save current state
+			ofstream ommcState(".ommpcState", ios::out|ios::trunc);
+			ommcState << "mode=" << curMode << endl;
+			ommcState << "vol=" << volume << endl;
+			ommcState << "playing=" << isPlaying << endl;
+			ommcState.close();
 
-#if defined(GP2X) || defined(WIZ)
+#if defined(GP2X) || defined(WIZ) || defined(PAND)
 			// kill MPD
 			if(mpdStarted && killMpd) {
 				mpd_sendKillCommand(threadParms.mpd);
 				mpd_finishCommand(threadParms.mpd);
+				lastfm.toggleScrobbling("off", "", "");
 				sync();
 				// Note: This causes at least the playlist file to be
 				// written before syncing, because MPD writes it

@@ -54,13 +54,29 @@ Menu::Menu(mpd_Connection* mpd, SDL_Surface* screen, SDL_Surface* bg, TTF_Font* 
 {
 }
 
+void Menu::resize(int screenWidth, int screenHeight, int numPerScreen) {
+	SDL_Rect resizeRect = { m_config.getItemAsNum("sk_main_x"),
+		m_config.getItemAsNum("sk_main_y"),
+		screenWidth * m_config.getItemAsFloat("sk_main_width"),
+		screenHeight - m_config.getItemAsFloat("sk_nowPlaying_height") 
+				  	 - m_config.getItemAsFloat("sk_stats_height"),
+	};
+
+	m_destRect = resizeRect;
+	m_clearRect = resizeRect;
+	m_numPerScreen = numPerScreen - 1;
+
+}
+
 void Menu::initAll()
 {
 	m_config.getItemAsColor("sk_main_itemColor", m_itemColor.r, m_itemColor.g, m_itemColor.b);
 	m_config.getItemAsColor("sk_main_curItemColor", m_curItemColor.r, m_curItemColor.g, m_curItemColor.b);
    
-	int width = m_config.getItemAsNum("sk_main_width"); 
-	int height = m_config.getItemAsNum("sk_main_height");
+	int width = m_config.getItemAsNum("sk_screen_width") * m_config.getItemAsNum("sk_main_width"); 
+	int height = m_config.getItemAsNum("sk_screen_height") - m_config.getItemAsFloat("sk_nowPlaying_height") 
+														- m_config.getItemAsFloat("sk_stats_height");
+
 	m_numPerRow = m_config.getItemAsNum("sk_menu_numPerRow");
 	m_rowHeight = m_config.getItemAsNum("sk_menu_rowHeight");
 	m_colWidth = m_config.getItemAsNum("sk_menu_colWidth");
@@ -68,6 +84,7 @@ void Menu::initAll()
 
 	//CHANGE HERE WHEN ADDING ITEMS, right now it's 2 items
 	m_2ndRowOffset = (width-(m_colWidth*3))/2;
+	m_1stRowOffset = (width-(m_colWidth*4))/2;
 	m_1stRowOffset2 = (width-(m_colWidth*3))/2;
 	m_1stRowOffset3 = (width-(m_colWidth*3))/2;
 
@@ -110,7 +127,7 @@ void Menu::initItems(int command)
 						  m_config.getItemAsNum("sk_font_menu_size") );
 			{
 				m_view = 0;
-				int xOffset = 0;
+				int xOffset = m_1stRowOffset;
 				int yOffset = m_ySize1;
 				MenuButton butt(m_config.getItem("LANG_MENU_NP"), "np", m_font);
 				butt.init(m_config, m_destRect.x+xOffset,m_destRect.y+yOffset, "np", CMD_SHOW_NP, m_colWidth, m_rowHeight);

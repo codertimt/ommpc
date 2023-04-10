@@ -43,6 +43,7 @@ public:
  	enum {TYPE_FOLDER, TYPE_FILE, TYPE_BACK, TYPE_ALL, TYPE_FILTER};
     Menu(mpd_Connection* mpd, SDL_Surface* bg, SDL_Surface* screen, TTF_Font* font, SDL_Rect& rect, Config& config, int skipVal, int numPerScreen, SongDb& songdb, Keyboard& kb, Playlist& pl);
 	
+	void resize(int screenWidth, int screenHeight, int numPerScreen);
 	void updateStatus(int mpdStatusChanged, mpd_Status* mpdStatus, bool updatingSongDb);
 	int processCommand(int command, GuiPos& guiPos);
 	void draw(bool forceRefresh, long timePerFrame, bool inBack);
@@ -66,6 +67,7 @@ protected:
 	int m_numPerRow;
 	int m_rowHeight;
 	int m_colWidth;
+	int m_1stRowOffset;
 	int m_2ndRowOffset;
 	int m_1stRowOffset2;
 	int m_1stRowOffset3;
