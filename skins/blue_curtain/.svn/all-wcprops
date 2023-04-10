@@ -1,0 +1,53 @@
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/!svn/ver/54/trunk/skins/blue_curtain
+END
+skin_noart.conf
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/!svn/ver/54/trunk/skins/blue_curtain/skin_noart.conf
+END
+bg.png
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/!svn/ver/47/trunk/skins/blue_curtain/bg.png
+END
+pause.png
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/!svn/ver/47/trunk/skins/blue_curtain/pause.png
+END
+bg_curItem.png
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/!svn/ver/47/trunk/skins/blue_curtain/bg_curItem.png
+END
+updatingdb.png
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/!svn/ver/47/trunk/skins/blue_curtain/updatingdb.png
+END
+up.png
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/!svn/ver/47/trunk/skins/blue_curtain/up.png
+END
+skin.conf
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/!svn/ver/54/trunk/skins/blue_curtain/skin.conf
+END
+down.png
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/!svn/ver/47/trunk/skins/blue_curtain/down.png
+END
